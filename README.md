@@ -6,14 +6,15 @@
 - 支持四类 Feature：`api` / `frontend` / `contract` / `unit`。
 - 每个 Feature 可列多个 Acceptance 场景，脚本会自动生成 Case ID、步骤、期望结果等字段。
 - 输出标准 `.xlsx`，可直接导入测试平台或用 Excel 打开。
+- 附带简单 Web UI，可在浏览器中粘贴需求并直接下载 Excel。
 
 ## 📦 Install
 ```bash
-pip3 install --user openpyxl
+pip3 install -r requirements.txt
 ```
 
 ## 📄 Requirement Format
-按 Feature 使用 Markdown 结构化描述：
+按 Feature 使用 Markdown 结构化描述（示例 `samples/requirements-sample.md`）：
 ```
 ## 登录接口
 Type: api
@@ -28,32 +29,33 @@ Constraints:
 Data:
 - username: string / required
 ```
-*字段说明：*
-- `Type`（必填）：api/frontend/contract/unit
-- `Acceptance`（必填）：多条用例场景
-- 其余（Summary/Prerequisites/Constraints/Data）可选。
 
-完整示例：`samples/requirements-sample.md`
-
-## 🚀 Usage
+## 🚀 CLI Usage
 ```bash
 python3 testcase_agent.py \
   --requirements samples/requirements-sample.md \
   --output output/testcases.xlsx \
-  --case-prefix QA   # 可选，默认 TC
+  --case-prefix QA
 ```
-运行后会在 `output/` 下生成 Excel：
-- 列包含：Case ID / Feature / Type / Scenario / Preconditions / Steps / Expected / Data Points / Constraints
+
+## 🌐 Web UI
+```bash
+python3 web_app.py
+```
+然后访问 <http://localhost:5000>，粘贴 Markdown 需求，可直接下载生成的 Excel。
 
 ## 📁 Repo Structure
 ```
 ./testcase-generator-skill/
 ├── README.md
-├── testcase_agent.py
+├── generator.py          # 通用解析/生成逻辑
+├── requirements.txt
+├── testcase_agent.py     # CLI
+├── web_app.py            # Flask Web UI
 └── samples/
     └── requirements-sample.md
 ```
 
 ## 🧩 Roadmap
-- 可扩展更多列（如优先级、预期数据）。
-- 可在未来接入 Web UI，将 Markdown 粘贴后直接下载 Excel。
+- 可扩展更多列（优先级、预期数据等）。
+- 可在 Web UI 中支持文件上传/历史记录。
