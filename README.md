@@ -6,7 +6,7 @@
 - 支持四类 Feature：`api` / `frontend` / `contract` / `unit`。
 - 每个 Feature 可列多个 Acceptance 场景，脚本会自动生成 Case ID、步骤、期望结果等字段。
 - 输出标准 `.xlsx`，可直接导入测试平台或用 Excel 打开。
-- 附带简单 Web UI，可在浏览器中粘贴需求并直接下载 Excel。
+- 提供 CLI + Flask Web UI；已适配 Vercel serverless。
 
 ## 📦 Install
 ```bash
@@ -14,23 +14,9 @@ pip3 install -r requirements.txt
 ```
 
 ## 📄 Requirement Format
-按 Feature 使用 Markdown 结构化描述（示例 `samples/requirements-sample.md`）：
-```
-## 登录接口
-Type: api
-Summary: xxx
-Prerequisites:
-- 条件1
-Acceptance:
-- 场景1
-- 场景2
-Constraints:
-- 约束1
-Data:
-- username: string / required
-```
+按 Feature 使用 Markdown 结构化描述（示例 `samples/requirements-sample.md`）。
 
-## 🚀 CLI Usage
+## 🚀 CLI
 ```bash
 python3 testcase_agent.py \
   --requirements samples/requirements-sample.md \
@@ -38,24 +24,40 @@ python3 testcase_agent.py \
   --case-prefix QA
 ```
 
-## 🌐 Web UI
+## 🌐 Web UI（本地）
 ```bash
 python3 web_app.py
 ```
-然后访问 <http://localhost:5000>，粘贴 Markdown 需求，可直接下载生成的 Excel。
+访问 <http://localhost:5000> 粘贴 Markdown 需求，即可下载 Excel。
+
+## ☁️ Vercel 部署
+1. 安装依赖并登录 Vercel：
+   ```bash
+   npm i -g vercel    # 如未安装
+   vercel login
+   ```
+2. 在仓库根目录执行：
+   ```bash
+   vercel --prod
+   ```
+   - `vercel.json` 已映射所有路由到 `api/index.py`。
+   - `api/index.py` 通过 `vercel-wsgi` 适配 Flask -> Serverless。
+3. 部署完成后，访问 Vercel 分配的域名即可使用在线版本。
 
 ## 📁 Repo Structure
 ```
 ./testcase-generator-skill/
 ├── README.md
-├── generator.py          # 通用解析/生成逻辑
+├── api/
+│   └── index.py            # Vercel serverless 入口
+├── generator.py
 ├── requirements.txt
-├── testcase_agent.py     # CLI
-├── web_app.py            # Flask Web UI
+├── testcase_agent.py
+├── web_app.py
 └── samples/
     └── requirements-sample.md
 ```
 
 ## 🧩 Roadmap
-- 可扩展更多列（优先级、预期数据等）。
-- 可在 Web UI 中支持文件上传/历史记录。
+- 扩展更多列（优先级、预期数据）。
+- Web UI 支持文件上传、历史列表。
