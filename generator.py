@@ -8,11 +8,26 @@ import json
 import re
 import time
 import uuid
+import xml.etree.ElementTree as ET
 
 from openpyxl import Workbook
 
 SECTION_RE = re.compile(r"^##\s+(.*)")
 FIELD_RE = re.compile(r"^(\w+):\s*(.*)$")
+
+NS_CONTENT = "urn:xmind:xmap:xmlns:content:2.0"
+NS_STYLE = "urn:xmind:xmap:xmlns:style:2.0"
+NS_COMMENTS = "urn:xmind:xmap:xmlns:comments:2.0"
+FO_NS = "http://www.w3.org/1999/XSL/Format"
+XHTML_NS = "http://www.w3.org/1999/xhtml"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+SVG_NS = "http://www.w3.org/2000/svg"
+
+ET.register_namespace("", NS_CONTENT)
+ET.register_namespace("fo", FO_NS)
+ET.register_namespace("xhtml", XHTML_NS)
+ET.register_namespace("xlink", XLINK_NS)
+ET.register_namespace("svg", SVG_NS)
 
 
 def parse_markdown(text: str) -> List[Dict[str, List[str]]]:
@@ -196,80 +211,73 @@ def _format_case_note(case: Dict[str, object]) -> str:
     return "\n".join(line for line in note_lines if line)
 
 
+def _new_id() -> str:
+    return uuid.uuid4().hex
+
+
 def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> bytes:
     if not cases:
         raise ValueError("no cases to export")
 
+    timestamp = str(int(time.time() * 1000))
     grouped: "OrderedDict[str, List[Dict[str, object]]]" = OrderedDict()
     for case in cases:
         grouped.setdefault(case["feature"], []).append(case)
 
-    def _topic(title: str, children: List[Dict[str, object]] | None = None, note: str | None = None) -> Dict[str, object]:
-        topic: Dict[str, object] = {
-            "id": str(uuid.uuid4()),
-            "title": title,
-        }
-        if children:
-            topic["children"] = {"attached": children}
-        if note:
-            topic["notes"] = {"plain": note}
-        return topic
-
-    feature_topics: List[Dict[str, object]] = []
-    for feature_name, feature_cases in grouped.items():
-        scenario_topics = [
-            _topic(f"{case['case_id']} · {case['scenario']}", note=_format_case_note(case))
-            for case in feature_cases
-        ]
-        feature_topics.append(
-            _topic(
-                f"{feature_name} ({len(feature_cases)})",
-                children=scenario_topics,
-            )
-        )
-
-    sheet_id = str(uuid.uuid4())
-    root_topic = {
-        "id": str(uuid.uuid4()),
-        "title": root_title,
-        "children": {"attached": feature_topics},
-    }
-    content = [
+    root = ET.Element(
+        f"{{{NS_CONTENT}}}xmap-content",
         {
-            "id": sheet_id,
-            "title": root_title,
-            "rootTopic": root_topic,
-        }
-    ]
+            "timestamp": timestamp,
+            "version": "2.0",
+        },
+    )
+    sheet = ET.SubElement(root, f"{{{NS_CONTENT}}}sheet", {"id": _new_id(), "timestamp": timestamp})
+    sheet_topic = ET.SubElement(sheet, f"{{{NS_CONTENT}}}topic", {"id": _new_id(), "timestamp": timestamp})
+    sheet_title = ET.SubElement(sheet_topic, f"{{{NS_CONTENT}}}title")
+    sheet_title.text = root_title
+    children = ET.SubElement(sheet_topic, f"{{{NS_CONTENT}}}children")
+    topics = ET.SubElement(children, f"{{{NS_CONTENT}}}topics", {"type": "attached"})
 
-    now_ms = int(time.time() * 1000)
-    metadata = {
-        "creator": "skills-testcase-generator",
-        "modifier": "skills-testcase-generator",
-        "created": now_ms,
-        "modified": now_ms,
-    }
-    manifest = {
-        "file-entries": {
-            "content.json": {
-                "media-type": "application/vnd.xmind.content",
-                "version": "2.0",
-            },
-            "metadata.json": {
-                "media-type": "application/vnd.xmind.metadata",
-                "version": "2.0",
-            },
-            "Revisions/": {
-                "media-type": "application/vnd.xmind.revisions",
-                "version": "2.0",
-            },
-        }
-    }
+    for feature_name, feature_cases in grouped.items():
+        feature_topic = ET.SubElement(topics, f"{{{NS_CONTENT}}}topic", {"id": _new_id(), "timestamp": timestamp})
+        feature_title = ET.SubElement(feature_topic, f"{{{NS_CONTENT}}}title")
+        feature_title.text = f"{feature_name} ({len(feature_cases)})"
+        feature_children = ET.SubElement(feature_topic, f"{{{NS_CONTENT}}}children")
+        feature_topics = ET.SubElement(feature_children, f"{{{NS_CONTENT}}}topics", {"type": "attached"})
+        for case in feature_cases:
+            case_topic = ET.SubElement(feature_topics, f"{{{NS_CONTENT}}}topic", {"id": _new_id(), "timestamp": timestamp})
+            case_title = ET.SubElement(case_topic, f"{{{NS_CONTENT}}}title")
+            case_title.text = f"{case['case_id']} · {case['scenario']}"
+            notes = ET.SubElement(case_topic, f"{{{NS_CONTENT}}}notes")
+            plain = ET.SubElement(notes, f"{{{NS_CONTENT}}}plain")
+            plain.text = _format_case_note(case)
+
+    sheet_name = ET.SubElement(sheet, f"{{{NS_CONTENT}}}title")
+    sheet_name.text = root_title
+
+    content_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    styles_xml = (
+        f"<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        f"<xmap-styles xmlns=\"{NS_STYLE}\" xmlns:fo=\"{FO_NS}\" xmlns:svg=\"{SVG_NS}\" version=\"2.0\"/>"
+    ).encode("utf-8")
+    comments_xml = (
+        f"<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        f"<comments xmlns=\"{NS_COMMENTS}\" version=\"2.0\"/>"
+    ).encode("utf-8")
 
     buffer = BytesIO()
     with ZipFile(buffer, "w", ZIP_DEFLATED) as zf:
-        zf.writestr("content.json", json.dumps(content, ensure_ascii=False, indent=2))
-        zf.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+        zf.writestr("content.xml", content_bytes)
+        zf.writestr("styles.xml", styles_xml)
+        zf.writestr("comments.xml", comments_xml)
+        # Back-compat manifest for newer XMind 2021
+        manifest = {
+            "file-entries": {
+                "content.xml": {"media-type": "text/xml", "version": "2.0"},
+                "styles.xml": {"media-type": "text/xml", "version": "2.0"},
+                "comments.xml": {"media-type": "text/xml", "version": "2.0"},
+            }
+        }
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     buffer.seek(0)
     return buffer.read()
