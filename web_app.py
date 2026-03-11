@@ -3,9 +3,15 @@
 from datetime import datetime
 from io import BytesIO
 
-from flask import Flask, render_template_string, request, send_file, flash, redirect, url_for
+from flask import Flask, render_template_string, request, send_file, flash
 
-from generator import parse_markdown, build_rows, rows_to_excel_bytes
+from generator import (
+    build_cases,
+    cases_to_rows,
+    cases_to_xmind_bytes,
+    parse_markdown,
+    rows_to_excel_bytes,
+)
 
 app = Flask(__name__)
 app.secret_key = "testcase-generator-secret"
@@ -24,6 +30,8 @@ TEMPLATE = """
     button { background:#17c0ff; color:#05060c; border:none; border-radius:999px; padding:12px 28px; font-size:15px; cursor:pointer; }
     button:hover { background:#15abd6; }
     .flash { margin:12px 0; padding:12px; border-radius:10px; background:#ff8a6522; border-left:4px solid #ff8a65; }
+    .format-select { margin:16px 0; }
+    label { display:inline-flex; align-items:center; gap:6px; }
   </style>
 </head>
 <body>
@@ -36,10 +44,14 @@ TEMPLATE = """
     {% endwith %}
     <form method="post">
       <label>Case ID Prefix:&nbsp;<input type="text" name="prefix" value="{{ prefix }}" /></label>
-      <p></p>
+      <div class="format-select">
+        <strong>导出格式：</strong>
+        <label><input type="radio" name="format" value="excel" {% if export_format == 'excel' %}checked{% endif %}/> Excel (.xlsx)</label>
+        <label><input type="radio" name="format" value="xmind" {% if export_format == 'xmind' %}checked{% endif %}/> XMind (.xmind)</label>
+      </div>
       <textarea name="requirements" placeholder="在此粘贴 Markdown 需求文档" required>{{ requirements }}</textarea>
       <p></p>
-      <button type="submit">生成 Excel</button>
+      <button type="submit">生成</button>
     </form>
   </div>
 </body>
@@ -51,24 +63,39 @@ TEMPLATE = """
 def index():
     prefix = request.form.get("prefix", "TC")
     requirements = request.form.get("requirements", "")
+    export_format = request.form.get("format", "excel")
     if request.method == "POST":
         if not requirements.strip():
             flash("请粘贴 Markdown 需求文档")
-            return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements)
+            return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements, export_format=export_format)
         features = parse_markdown(requirements)
         if not features:
             flash("未解析到 Feature。请确认文档使用 `## Feature` + Acceptance 列表。")
-            return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements)
-        rows = build_rows(features, case_prefix=prefix)
+            return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements, export_format=export_format)
+        cases = build_cases(features, case_prefix=prefix)
+        timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        root_title = f"Testcases-{prefix.upper()}"
+
+        if export_format == "xmind":
+            xmind_bytes = cases_to_xmind_bytes(cases, root_title=root_title)
+            filename = f"testcases-{timestamp}.xmind"
+            return send_file(
+                BytesIO(xmind_bytes),
+                mimetype="application/vnd.xmind.workbook",
+                as_attachment=True,
+                download_name=filename,
+            )
+
+        rows = cases_to_rows(cases)
         excel_bytes = rows_to_excel_bytes(rows)
-        filename = f"testcases-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
+        filename = f"testcases-{timestamp}.xlsx"
         return send_file(
             BytesIO(excel_bytes),
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             as_attachment=True,
             download_name=filename,
         )
-    return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements)
+    return render_template_string(TEMPLATE, prefix=prefix, requirements=requirements, export_format=export_format)
 
 
 if __name__ == "__main__":

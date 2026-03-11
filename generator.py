@@ -1,8 +1,13 @@
 """Core logic for testcase generation (shared by CLI & Web)."""
+from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
+from zipfile import ZIP_DEFLATED, ZipFile
+import json
 import re
+import time
+import uuid
 
 from openpyxl import Workbook
 
@@ -89,8 +94,8 @@ def build_expected(feature_type: str, scenario: str) -> str:
     return mapping.get(feature_type, f"系统行为满足 {scenario} 的预期")
 
 
-def build_rows(features: List[Dict[str, List[str]]], case_prefix: str = "TC") -> List[List[str]]:
-    rows: List[List[str]] = []
+def build_cases(features: List[Dict[str, List[str]]], case_prefix: str = "TC") -> List[Dict[str, object]]:
+    cases: List[Dict[str, object]] = []
     prefix = case_prefix.upper()
     for f_idx, feature in enumerate(features, start=1):
         scenarios = feature.get("acceptance") or ["缺少 Acceptance 条目"]
@@ -100,17 +105,38 @@ def build_rows(features: List[Dict[str, List[str]]], case_prefix: str = "TC") ->
         prereq = feature.get("prerequisites", [])
         for s_idx, scenario in enumerate(scenarios, start=1):
             case_id = f"{prefix}-F{f_idx:02d}-S{s_idx:02d}"
-            rows.append([
-                case_id,
-                feature.get("name", f"Feature {f_idx}"),
-                ftype,
-                scenario,
-                "; ".join(prereq) if prereq else "",
-                build_steps(ftype, scenario, data_points),
-                build_expected(ftype, scenario),
-                "; ".join(data_points) if data_points else "",
-                "; ".join(constraints) if constraints else "",
-            ])
+            cases.append(
+                {
+                    "case_id": case_id,
+                    "feature": feature.get("name", f"Feature {f_idx}"),
+                    "type": ftype,
+                    "scenario": scenario,
+                    "preconditions": prereq[:],
+                    "steps": build_steps(ftype, scenario, data_points),
+                    "expected": build_expected(ftype, scenario),
+                    "data_points": data_points[:],
+                    "constraints": constraints[:],
+                }
+            )
+    return cases
+
+
+def cases_to_rows(cases: List[Dict[str, object]]) -> List[List[str]]:
+    rows: List[List[str]] = []
+    for case in cases:
+        rows.append(
+            [
+                case["case_id"],
+                case["feature"],
+                case["type"],
+                case["scenario"],
+                "; ".join(case["preconditions"]) if case["preconditions"] else "",
+                case["steps"],
+                case["expected"],
+                "; ".join(case["data_points"]) if case["data_points"] else "",
+                "; ".join(case["constraints"]) if case["constraints"] else "",
+            ]
+        )
     return rows
 
 
@@ -145,6 +171,114 @@ def save_rows_to_excel(rows: List[List[str]], output_path: Path) -> None:
     data = rows_to_excel_bytes(rows)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(data)
+
+
+def _note_block(title: str, items: List[str]) -> List[str]:
+    if not items:
+        return []
+    block = [title]
+    block.extend(f"- {item}" for item in items)
+    return block
+
+
+def _format_case_note(case: Dict[str, object]) -> str:
+    note_lines = [
+        f"Case ID: {case['case_id']}",
+        f"类型: {case['type']}",
+    ]
+    note_lines.extend(_note_block("前置条件", case.get("preconditions", [])))
+    note_lines.append("步骤：")
+    note_lines.extend(str(case["steps"]).splitlines())
+    note_lines.append("期望结果：")
+    note_lines.append(str(case["expected"]))
+    note_lines.extend(_note_block("数据要点", case.get("data_points", [])))
+    note_lines.extend(_note_block("约束", case.get("constraints", [])))
+    return "\n".join(line for line in note_lines if line)
+
+
+def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> bytes:
+    if not cases:
+        raise ValueError("no cases to export")
+
+    grouped: "OrderedDict[str, List[Dict[str, object]]]" = OrderedDict()
+    for case in cases:
+        grouped.setdefault(case["feature"], []).append(case)
+
+    def _topic(title: str, children: List[Dict[str, object]] | None = None, note: str | None = None) -> Dict[str, object]:
+        topic: Dict[str, object] = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+        }
+        if children:
+            topic["children"] = {"attached": children}
+        if note:
+            topic["notes"] = {"plain": note}
+        return topic
+
+    feature_topics: List[Dict[str, object]] = []
+    for feature_name, feature_cases in grouped.items():
+        scenario_topics = [
+            _topic(f"{case['case_id']} · {case['scenario']}", note=_format_case_note(case))
+            for case in feature_cases
+        ]
+        feature_topics.append(
+            _topic(
+                f"{feature_name} ({len(feature_cases)})",
+                children=scenario_topics,
+            )
+        )
+
+    sheet_id = str(uuid.uuid4())
+    root_topic = {
+        "id": str(uuid.uuid4()),
+        "title": root_title,
+        "children": {"attached": feature_topics},
+    }
+    content = [
+        {
+            "id": sheet_id,
+            "title": root_title,
+            "rootTopic": root_topic,
+        }
+    ]
+
+    now_ms = int(time.time() * 1000)
+    metadata = {
+        "creator": "skills-testcase-generator",
+        "modifier": "skills-testcase-generator",
+        "created": now_ms,
+        "modified": now_ms,
+    }
+    manifest = {
+        "file-entries": {
+            "content.json": {
+                "media-type": "application/vnd.xmind.content",
+                "version": "2.0",
+            },
+            "metadata.json": {
+                "media-type": "application/vnd.xmind.metadata",
+                "version": "2.0",
+            },
+            "Revisions/": {
+                "media-type": "application/vnd.xmind.revisions",
+                "version": "2.0",
+            },
+        }
+    }
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as zf:
+        zf.writestr("content.json", json.dumps(content, ensure_ascii=False, indent=2))
+        zf.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    buffer.seek(0)
+    return buffer.read()
+
+
+def save_cases_to_xmind(cases: List[Dict[str, object]], output_path: Path, root_title: str) -> None:
+    bytes_data = cases_to_xmind_bytes(cases, root_title=root_title)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(bytes_data)
 
 
 def load_features_from_file(path: Path) -> List[Dict[str, List[str]]]:

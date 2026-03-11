@@ -1,11 +1,11 @@
 # Testcase Generator Skill (Standalone)
 
-> 从 Markdown 需求文档自动生成 API / 前端 / 合约 / Unit Test 的测试用例表（Excel）。
+> 从 Markdown 需求文档自动生成 API / 前端 / 合约 / Unit Test 的测试用例表，可导出 Excel 或 XMind。
 
 ## ✨ Features
 - 支持四类 Feature：`api` / `frontend` / `contract` / `unit`。
 - 每个 Feature 可列多个 Acceptance 场景，脚本会自动生成 Case ID、步骤、期望结果等字段。
-- 输出标准 `.xlsx`，可直接导入测试平台或用 Excel 打开。
+- 输出标准 `.xlsx`，或 `.xmind` 脑图用于评审沟通；两种格式可任选其一或同批生成。
 - 提供 CLI + Flask Web UI；已适配 Vercel serverless。
 
 ## 📦 Install
@@ -21,14 +21,16 @@ pip3 install -r requirements.txt
 python3 testcase_agent.py \
   --requirements samples/requirements-sample.md \
   --output output/testcases.xlsx \
+  --xmind-output output/testcases.xmind \
   --case-prefix QA
 ```
+- `--output` / `--xmind-output` 至少保留一个，亦可同时生成双格式。
 
 ## 🌐 Web UI（本地）
 ```bash
 python3 web_app.py
 ```
-访问 <http://localhost:5000> 粘贴 Markdown 需求，即可下载 Excel。
+访问 <http://localhost:5000> 粘贴 Markdown 需求，选择导出格式（Excel / XMind）即可下载。
 
 ## ☁️ Vercel 部署
 1. 安装依赖并登录 Vercel：
@@ -42,7 +44,7 @@ python3 web_app.py
    ```
    - `vercel.json` 已映射所有路由到 `api/index.py`。
    - `api/index.py` 通过 `vercel-wsgi` 适配 Flask -> Serverless。
-3. 部署完成后，访问 Vercel 分配的域名即可使用在线版本。
+3. 部署完成后，访问 Vercel 分配的域名即可使用在线版本（导出选项同本地 Web UI）。
 
 ## 📁 Repo Structure
 ```
