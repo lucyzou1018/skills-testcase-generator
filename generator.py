@@ -230,6 +230,10 @@ def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> byt
             "version": "2.0",
         },
     )
+    root.set("xmlns:fo", FO_NS)
+    root.set("xmlns:xhtml", XHTML_NS)
+    root.set("xmlns:xlink", XLINK_NS)
+    root.set("xmlns:svg", SVG_NS)
     sheet = ET.SubElement(root, f"{{{NS_CONTENT}}}sheet", {"id": _new_id(), "timestamp": timestamp})
     sheet_topic = ET.SubElement(sheet, f"{{{NS_CONTENT}}}topic", {"id": _new_id(), "timestamp": timestamp})
     sheet_title = ET.SubElement(sheet_topic, f"{{{NS_CONTENT}}}title")
