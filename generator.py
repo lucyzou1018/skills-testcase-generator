@@ -4,7 +4,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
 from zipfile import ZIP_DEFLATED, ZipFile
-import json
 import re
 import time
 import uuid
@@ -270,15 +269,6 @@ def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> byt
         zf.writestr("content.xml", content_bytes)
         zf.writestr("styles.xml", styles_xml)
         zf.writestr("comments.xml", comments_xml)
-        # Back-compat manifest for newer XMind 2021
-        manifest = {
-            "file-entries": {
-                "content.xml": {"media-type": "text/xml", "version": "2.0"},
-                "styles.xml": {"media-type": "text/xml", "version": "2.0"},
-                "comments.xml": {"media-type": "text/xml", "version": "2.0"},
-            }
-        }
-        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     buffer.seek(0)
     return buffer.read()
 
