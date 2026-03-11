@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
 from zipfile import ZIP_DEFLATED, ZipFile
+import json
 import re
 import time
 import uuid
@@ -210,6 +211,55 @@ def _format_case_note(case: Dict[str, object]) -> str:
     return "\n".join(line for line in note_lines if line)
 
 
+def _json_topic(title: str, children: List[Dict[str, object]] | None = None) -> Dict[str, object]:
+    topic = {"id": _new_id(), "class": "topic", "title": title}
+    if children:
+        topic["children"] = {"attached": children}
+    return topic
+
+
+def cases_to_content_json(cases: List[Dict[str, object]], root_title: str) -> tuple[str, List[Dict[str, object]]]:
+    grouped: "OrderedDict[str, List[Dict[str, object]]]" = OrderedDict()
+    for case in cases:
+        grouped.setdefault(case["feature"], []).append(case)
+
+    feature_topics: List[Dict[str, object]] = []
+    for feature_name, feature_cases in grouped.items():
+        scenario_topics: List[Dict[str, object]] = []
+        for case in feature_cases:
+            detail_nodes: List[Dict[str, object]] = [
+                _json_topic(f"Case ID: {case['case_id']}"),
+                _json_topic(f"Type: {case['type']}"),
+            ]
+            if case.get("preconditions"):
+                detail_nodes.append(_json_topic("Preconditions", [_json_topic(item) for item in case["preconditions"]]))
+            steps = str(case["steps"]).splitlines()
+            if steps:
+                detail_nodes.append(_json_topic("Steps", [_json_topic(line.strip()) for line in steps if line.strip()]))
+            expected = str(case["expected"]).strip()
+            if expected:
+                detail_nodes.append(_json_topic(f"Expected: {expected}"))
+            if case.get("data_points"):
+                detail_nodes.append(_json_topic("Data Points", [_json_topic(item) for item in case["data_points"]]))
+            if case.get("constraints"):
+                detail_nodes.append(_json_topic("Constraints", [_json_topic(item) for item in case["constraints"]]))
+            scenario_topics.append(_json_topic(f"{case['case_id']} · {case['scenario']}", detail_nodes))
+        feature_topics.append(_json_topic(f"{feature_name} ({len(feature_cases)})", scenario_topics))
+
+    root_topic = _json_topic(root_title, feature_topics)
+    sheet_id = _new_id()
+    sheet = {
+        "id": sheet_id,
+        "class": "sheet",
+        "title": root_title,
+        "rootTopic": root_topic,
+        "topicPositioning": "fixed",
+    }
+    return sheet_id, [sheet]
+
+
+
+
 def _new_id() -> str:
     return uuid.uuid4().hex
 
@@ -219,6 +269,15 @@ def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> byt
         raise ValueError("no cases to export")
 
     timestamp = str(int(time.time() * 1000))
+    sheet_id, content_json = cases_to_content_json(cases, root_title)
+    metadata = {
+        "dataStructureVersion": "2",
+        "layoutEngineVersion": "3",
+        "activeSheetId": sheet_id,
+        "creator": {"name": "testcase-generator", "version": "1.0"},
+        "modifier": "testcase-generator",
+    }
+
     grouped: "OrderedDict[str, List[Dict[str, object]]]" = OrderedDict()
     for case in cases:
         grouped.setdefault(case["feature"], []).append(case)
@@ -268,11 +327,24 @@ def cases_to_xmind_bytes(cases: List[Dict[str, object]], root_title: str) -> byt
         f"<comments xmlns=\"{NS_COMMENTS}\" version=\"2.0\"/>"
     ).encode("utf-8")
 
+    manifest = {
+        "file-entries": {
+            "content.json": {},
+            "metadata.json": {},
+            "content.xml": {},
+            "styles.xml": {},
+            "comments.xml": {},
+        }
+    }
+
     buffer = BytesIO()
     with ZipFile(buffer, "w", ZIP_DEFLATED) as zf:
+        zf.writestr("content.json", json.dumps(content_json, ensure_ascii=False, indent=2))
+        zf.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
         zf.writestr("content.xml", content_bytes)
         zf.writestr("styles.xml", styles_xml)
         zf.writestr("comments.xml", comments_xml)
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     buffer.seek(0)
     return buffer.read()
 
